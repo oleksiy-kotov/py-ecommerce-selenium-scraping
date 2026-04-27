@@ -72,18 +72,41 @@ class FateScraper:
                 break
 
     def extract_product_data(self, item) -> Optional[Product]:
-        """Логіка витягування даних з одного блоку товару."""
+        """Витягує дані, враховуючи, що рейтинг може бути вказаний по-різному."""
         try:
             title_el = item.find_element(By.CLASS_NAME, "title")
+
+            # 1. Спроба дістати ціну
+            price_text = item.find_element(By.CLASS_NAME, "price").text.replace("$", "")
+
+            # 2. Логіка рейтингу (твій початковий підхід + безпека)
+            rating = 0
+            try:
+                # Спосіб А: Атрибут data-rating
+                rating_attr = item.find_element(By.CSS_SELECTOR, "p[data-rating]").get_attribute("data-rating")
+                rating = int(rating_attr) if rating_attr else 0
+            except:
+                # Спосіб Б: Рахуємо зірочки (якщо атрибута немає)
+                stars = item.find_elements(By.CSS_SELECTOR, ".ws-icon-star")
+                rating = len(stars)
+
+            # 3. Кількість відгуків
+            try:
+                reviews_text = item.find_element(By.CLASS_NAME, "review-count").text
+                num_reviews = int(reviews_text.split()[0])
+            except:
+                num_reviews = 0
+
             return Product(
                 title=title_el.get_attribute("title") or title_el.text,
                 description=item.find_element(By.CLASS_NAME, "description").text,
-                price=float(item.find_element(By.CLASS_NAME, "price").text.replace("$", "")),
-                rating=int(item.find_element(By.CSS_SELECTOR, "p[data-rating]").get_attribute("data-rating") or 0),
-                num_of_reviews=int(item.find_element(By.CLASS_NAME, "review-count").text.split()[0])
+                price=float(price_text),
+                rating=rating,
+                num_of_reviews=num_reviews
             )
         except Exception as e:
-            logging.warning(f"Failed to parse product: {e}")
+            # Це залишимо для дебагу, але тепер воно не буде спамити так часто
+            logging.debug(f"Skip item due to: {e}")
             return None
 
     def scrape_category(self, url: str) -> List[Product]:
