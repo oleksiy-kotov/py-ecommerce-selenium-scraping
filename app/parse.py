@@ -10,7 +10,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-# Налаштування логування
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 BASE_URL = "https://webscraper.io/test-sites/e-commerce/more/"
@@ -27,12 +26,12 @@ class Product:
 
 class FateScraper:
     def __init__(self, headless: bool = True):
-        self.options = Options()
+        options = Options()
         if headless:
-            self.options.add_argument("--headless")
-        self.options.add_argument("--no-sandbox")
-        self.options.add_argument("--disable-dev-shm-usage")
-        self.driver = webdriver.Chrome(options=self.options)
+            options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        self.driver = webdriver.Chrome(options=options)
         self.wait = WebDriverWait(self.driver, 10)
 
     def __enter__(self):
@@ -42,9 +41,8 @@ class FateScraper:
         self.driver.quit()
 
     def accept_cookies(self):
-        """Приймає кукі лише якщо вони є, з коротким очікуванням."""
         try:
-            btn = WebDriverWait(self.driver, 3).until(
+            btn = WebDriverWait(self.driver, 2).until(
                 EC.element_to_be_clickable((By.CLASS_NAME, "acceptCookies"))
             )
             btn.click()
@@ -52,19 +50,15 @@ class FateScraper:
             pass
 
     def click_more_until_done(self):
-        """Тисне 'More' до переможного кінця, перевіряючи кількість товарх."""
         while True:
             try:
-                # Знаходимо кнопку
                 more_btn = self.driver.find_elements(By.CSS_SELECTOR, ".ecomerce-items-scroll-more")
                 if not more_btn or not more_btn[0].is_displayed():
                     break
 
                 current_count = len(self.driver.find_elements(By.CLASS_NAME, "thumbnail"))
-
                 self.driver.execute_script("arguments[0].click();", more_btn[0])
 
-                # Чекаємо, поки товарів стане більше, ніж було
                 self.wait.until(
                     lambda d: len(d.find_elements(By.CLASS_NAME, "thumbnail")) > current_count
                 )
@@ -72,25 +66,19 @@ class FateScraper:
                 break
 
     def extract_product_data(self, item) -> Optional[Product]:
-        """Витягує дані, враховуючи, що рейтинг може бути вказаний по-різному."""
         try:
             title_el = item.find_element(By.CLASS_NAME, "title")
-
-            # 1. Спроба дістати ціну
             price_text = item.find_element(By.CLASS_NAME, "price").text.replace("$", "")
 
-            # 2. Логіка рейтингу (твій початковий підхід + безпека)
+            # Надійний парсинг рейтингу (Спосіб А -> Спосіб Б)
             rating = 0
             try:
-                # Спосіб А: Атрибут data-rating
                 rating_attr = item.find_element(By.CSS_SELECTOR, "p[data-rating]").get_attribute("data-rating")
                 rating = int(rating_attr) if rating_attr else 0
             except:
-                # Спосіб Б: Рахуємо зірочки (якщо атрибута немає)
                 stars = item.find_elements(By.CSS_SELECTOR, ".ws-icon-star")
                 rating = len(stars)
 
-            # 3. Кількість відгуків
             try:
                 reviews_text = item.find_element(By.CLASS_NAME, "review-count").text
                 num_reviews = int(reviews_text.split()[0])
@@ -104,9 +92,7 @@ class FateScraper:
                 rating=rating,
                 num_of_reviews=num_reviews
             )
-        except Exception as e:
-            # Це залишимо для дебагу, але тепер воно не буде спамити так часто
-            logging.debug(f"Skip item due to: {e}")
+        except Exception:
             return None
 
     def scrape_category(self, url: str) -> List[Product]:
@@ -117,35 +103,36 @@ class FateScraper:
 
         items = self.driver.find_elements(By.CLASS_NAME, "thumbnail")
         products = [self.extract_product_data(i) for i in items]
-        return [p for p in products if p]  # Видаляємо None
+        return [p for p in products if p]
 
 
-def save_to_csv(products: List[Product], filename: str):
+def write_products_to_csv(products: List[Product], filename: str):
     if not products:
         return
-
     header = [f.name for f in fields(Product)]
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=header)
         writer.writeheader()
         for p in products:
             writer.writerow(p.__dict__)
-    logging.info(f"Saved {len(products)} items to {filename}")
 
 
-def main():
-    pages = {
+def get_all_products():
+    """Основна функція згідно зі специфікацією."""
+    PAGES = {
         "home": BASE_URL,
+        "computers": urljoin(BASE_URL, "computers"),
         "laptops": urljoin(BASE_URL, "computers/laptops"),
         "tablets": urljoin(BASE_URL, "computers/tablets"),
-        "phones": urljoin(BASE_URL, "phones/touch"),
+        "phones": urljoin(BASE_URL, "phones"),
+        "touch": urljoin(BASE_URL, "phones/touch"),
     }
 
     with FateScraper(headless=True) as scraper:
-        for name, url in pages.items():
+        for name, url in PAGES.items():
             data = scraper.scrape_category(url)
-            save_to_csv(data, f"{name}.csv")
+            write_products_to_csv(data, f"{name}.csv")
 
 
 if __name__ == "__main__":
-    main()
+    get_all_products()
